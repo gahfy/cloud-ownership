@@ -1,5 +1,7 @@
-#!/bin/sh
-source variables.sh
+#!/bin/bash
+
+#Include variables.sh
+source $(dirname $0)/variables.sh
 SERVER_FQDN=$(hostname -f)
 
 # Update Debian
@@ -29,5 +31,12 @@ SSHFP_RECORD="Add the following record to your DNS:\n$(ssh-keygen -r $SERVER_FQD
 
 ################ INSTALL MARIADB ################
 sudo apt -y install mariadb-server
+
+# Switch to Unix socket authentication
+# Change root password
+# Remove anonymous user
+# Disallow root login remotely
+# Remove test database and access to it
+# Reload privileges tables
 
 echo $SSHFP_RECORD
