@@ -41,7 +41,7 @@ mysql -u root -e "FLUSH PRIVILEGES;" > /dev/null 2>&1
 
 ################ INSTALL POSTFIX ################
 echo "Installing Postfix"
-DEBIAN_FRONTEND=noninteractive apt -y -qq install postfix postfix-mysql > /dev/null 2>&1
+# Configure MySQL
 mysql -u root -e "CREATE DATABASE postfix;" > /dev/null 2>&1
 mysql -u root -e "GRANT ALL PRIVILEGES ON postfix.* to 'mail'@'localhost' IDENTIFIED BY '$MARIADB_MAIL_PASSWD';" > /dev/null 2>&1
 mysql -u root -e "FLUSH PRIVILEGES;" > /dev/null 2>&1
@@ -51,9 +51,11 @@ mysql -u mail -p$MARIADB_MAIL_PASSWD -e "CREATE TABLE postfix.users (id varchar(
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.domains (domain) VALUES ('localhost'), ('localhost.localdomain');"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.aliases (mail,destination) VALUES('postmaster@localhost','root@localhost'),('sysadmin@localhost','root@localhost'),('webmaster@localhost','root@localhost'),('abuse@localhost','root@localhost'),('root@localhost','root@localhost'),('@localhost','root@localhost'),('@localhost.localdomain','@localhost');"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.users (id,name,maildir,crypt) VALUES ('root@localhost','root','root/',encrypt('$MAIL_ROOT_LOCALHOST_PASSWD', CONCAT('\$5\$', MD5(RAND()))) );"
-mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO domains (domain) VALUES ('$MAIL_DOMAIN');"
-mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO users (id,name,maildir,crypt) VALUES ('$MAIL_USER','$MAIL_USER_FULL_NAME','$MAIL_USER_FOLDER/',encrypt('$MAIL_USER_PASSWD', CONCAT('\$5\$', MD5(RAND()))) );"
+mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.domains (domain) VALUES ('$MAIL_DOMAIN');"
+mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.users (id,name,maildir,crypt) VALUES ('$MAIL_USER','$MAIL_USER_FULL_NAME','$MAIL_USER_FOLDER/',encrypt('$MAIL_USER_PASSWD', CONCAT('\$5\$', MD5(RAND()))) );"
 
+# Install Postfix and Postfix-Mysql
+DEBIAN_FRONTEND=noninteractive apt -y -qq install postfix postfix-mysql > /dev/null 2>&1
 cp /etc/aliases /etc/postfix/aliases
 postalias /etc/postfix/aliases
 mkdir -p /data/mail/virtual
@@ -89,6 +91,11 @@ hosts=127.0.0.1
 additional_conditions = and enabled = 1" >> /etc/postfix/mysql_domains.cf
 sudo chown root:postfix /etc/postfix/mysql_*
 sudo chmod 0640 /etc/postfix/mysql_*
-systemctl postfix restart
+
+# Disable authentication on port 25, then open the port to any
+sed -i 's/permit_sasl_authenticated //' /etc/postfix/main.cf
+ufw allow from any to any port 25
+
+# Restart postfix
 
 echo $SSHFP_RECORD
