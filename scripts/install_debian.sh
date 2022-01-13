@@ -18,7 +18,7 @@ ufw logging off > /dev/null 2>&1
 ################ INSTALL SUDO ################
 echo "Installing and configuring sudo"
 apt -y install sudo > /dev/null 2>&1
-echo "$USERNAME  ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers
+echo "$USERNAME_FOR_SSH  ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 ################ INSTALL SSH ################
 echo "Installing and configuring SSH"
@@ -44,7 +44,7 @@ mysql -u root -e "FLUSH PRIVILEGES;" > /dev/null 2>&1
 echo "Installing and configuring Certbot"
 apt -y install certbot
 ufw allow from any to any port 80
-certbot certonly --domain $SMTP_DOMAIN_NAME --agree-tos  --standalone
+certbot certonly --domain $SMTP_DOMAIN_NAME --email $MAIL_USER --agree-tos  --standalone --no-eff-email
 
 ################ INSTALL POSTFIX ################
 echo "Installing and configuring Postfix"
@@ -79,7 +79,7 @@ echo 'virtual_mailbox_domains = mysql:/etc/postfix/mysql_domains.cf' >> /etc/pos
 echo 'virtual_uid_maps = static:5000' >> /etc/postfix/main.cf
 echo 'virtual_gid_maps = static:5000' >> /etc/postfix/main.cf
 echo 'local_recipient_maps = ' >> /etc/postfix/main.cf
-sudo sed -i 's/mydestination =.*/mydestination =/' /etc/postfix/main.cf
+sed -i 's/mydestination =.*/mydestination =/' /etc/postfix/main.cf
 echo "user=mail
 password=$MARIADB_MAIL_PASSWD
 dbname=postfix
@@ -96,12 +96,16 @@ select_field=destination
 where_field=mail
 hosts=127.0.0.1
 additional_conditions = and enabled = 1" >> /etc/postfix/mysql_domains.cf
-sudo chown root:postfix /etc/postfix/mysql_*
-sudo chmod 0640 /etc/postfix/mysql_*
+chown root:postfix /etc/postfix/mysql_*
+chmod 0640 /etc/postfix/mysql_*
 
 # Disable authentication on port 25, then open the port to any
 sed -i 's/permit_sasl_authenticated //' /etc/postfix/main.cf
 ufw allow from any to any port 25 > /dev/null 2>&1
+
+# Configuring STARTTLS
+sed -i "s|smtpd_tls_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem|smtpd_tls_cert_file=/etc/letsencrypt/live/$SMTP_DOMAIN_NAME/cert.pem|" /etc/postfix/main.cf
+sed -i "s|smtpd_tls_key_file=/etc/ssl/private/ssl-cert-snakeoil.key|smtpd_tls_key_file=/etc/letsencrypt/live/$SMTP_DOMAIN_NAME/privkey.pem|" /etc/postfix/main.cf
 
 # Restart postfix
 
