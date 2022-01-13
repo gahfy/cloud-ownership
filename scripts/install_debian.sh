@@ -5,6 +5,7 @@ source $(dirname $0)/variables.sh
 SERVER_FQDN=$(hostname -f)
 
 # Update Debian
+echo "Initialization and update of the OS"
 apt update > /dev/null 2>&1
 apt -y upgrade > /dev/null 2>&1
 
@@ -17,7 +18,7 @@ ufw logging off > /dev/null 2>&1
 ################ INSTALL SUDO ################
 echo "Installing and configuring sudo"
 apt -y install sudo > /dev/null 2>&1
-echo "$USERNAME  ALL=(ALL) NOPASSWD:ALL" > /dev/null 2>&1
+echo "$USERNAME  ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers
 
 ################ INSTALL SSH ################
 echo "Installing and configuring SSH"
@@ -39,8 +40,14 @@ sudo apt -y install mariadb-server > /dev/null 2>&1
 mysql -u root -e "SET PASSWORD FOR 'root'@'localhost'=PASSWORD('$MARIADB_ROOT_PASSWORD');" > /dev/null 2>&1
 mysql -u root -e "FLUSH PRIVILEGES;" > /dev/null 2>&1
 
+################ INSTALL CERTBOT ################
+echo "Installing and configuring Certbot"
+apt -y install certbot
+ufw allow from any to any port 80
+certbot certonly --domain $SMTP_DOMAIN_NAME --agree-tos  --standalone
+
 ################ INSTALL POSTFIX ################
-echo "Installing Postfix"
+echo "Installing and configuring Postfix"
 # Configure MySQL
 mysql -u root -e "CREATE DATABASE postfix;" > /dev/null 2>&1
 mysql -u root -e "GRANT ALL PRIVILEGES ON postfix.* to 'mail'@'localhost' IDENTIFIED BY '$MARIADB_MAIL_PASSWD';" > /dev/null 2>&1
@@ -94,7 +101,7 @@ sudo chmod 0640 /etc/postfix/mysql_*
 
 # Disable authentication on port 25, then open the port to any
 sed -i 's/permit_sasl_authenticated //' /etc/postfix/main.cf
-ufw allow from any to any port 25
+ufw allow from any to any port 25 > /dev/null 2>&1
 
 # Restart postfix
 
