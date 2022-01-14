@@ -48,12 +48,12 @@ mysql -u root -e "GRANT ALL PRIVILEGES ON postfix.* to 'mail'@'localhost' IDENTI
 mysql -u root -e "FLUSH PRIVILEGES;" > /dev/null 2>&1
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "CREATE TABLE postfix.aliases(pkid smallint(3) NOT NULL auto_increment,mail varchar(120) NOT NULL default '',destination varchar(120) NOT NULL default '',enabled tinyint(1) NOT NULL default '1',PRIMARY KEY  (pkid),UNIQUE KEY mail (mail));"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "CREATE TABLE postfix.domains (pkid smallint(6) NOT NULL auto_increment,domain varchar(120) NOT NULL default '',transport varchar(120) NOT NULL default 'virtual:',enabled tinyint(1) NOT NULL default '1',PRIMARY KEY  (pkid));"
-mysql -u mail -p$MARIADB_MAIL_PASSWD -e "CREATE TABLE postfix.users (id varchar(128) NOT NULL default '',name varchar(128) NOT NULL default '',uid smallint(5) unsigned NOT NULL default '5000',gid smallint(5) unsigned NOT NULL default '5000',home varchar(255) NOT NULL default '/data/mail/virtual',maildir varchar(255) NOT NULL default 'blah/',enabled tinyint(1) NOT NULL default '1',change_password tinyint(1) NOT NULL default '1',crypt varchar(128) NOT NULL,quota varchar(255) NOT NULL default '',PRIMARY KEY  (id),UNIQUE KEY id (id));"
+mysql -u mail -p$MARIADB_MAIL_PASSWD -e "CREATE TABLE postfix.users (id varchar(128) NOT NULL default '',name varchar(128) NOT NULL default '',uid smallint(5) unsigned NOT NULL default '5000',gid smallint(5) unsigned NOT NULL default '5000',home varchar(255) NOT NULL default '/data/mail/virtual',maildir varchar(255) NOT NULL default 'blah/',enabled tinyint(1) NOT NULL default '1',change_password tinyint(1) NOT NULL default '1',crypt varchar(128) NOT NULL,quota varchar(255) NOT NULL default '', regex varchar(128) default null, PRIMARY KEY  (id),UNIQUE KEY id (id));"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.domains (domain) VALUES ('localhost'), ('localhost.localdomain');"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.aliases (mail,destination) VALUES('postmaster@localhost','root@localhost'),('sysadmin@localhost','root@localhost'),('webmaster@localhost','root@localhost'),('abuse@localhost','root@localhost'),('root@localhost','root@localhost'),('@localhost','root@localhost'),('@localhost.localdomain','@localhost');"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.users (id,name,maildir,crypt) VALUES ('root@localhost','root','root/',encrypt('$MAIL_ROOT_LOCALHOST_PASSWD', CONCAT('\$5\$', MD5(RAND()))) );"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.domains (domain) VALUES ('$MAIL_DOMAIN');"
-mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.users (id,name,maildir,crypt) VALUES ('$MAIL_USER','$MAIL_USER_FULL_NAME','$MAIL_USER_FOLDER/',encrypt('$MAIL_USER_PASSWD', CONCAT('\$5\$', MD5(RAND()))) );"
+mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.users (id,name,maildir,crypt, regex) VALUES ('$MAIL_USER','$MAIL_USER_FULL_NAME','$MAIL_USER_FOLDER/',encrypt('$MAIL_USER_PASSWD', CONCAT('\$5\$', MD5(RAND()))), '$MAIL_USER_REGEX' );"
 
 # Install Postfix and Postfix-Mysql
 DEBIAN_FRONTEND=noninteractive apt -y -qq install postfix postfix-mysql > /dev/null 2>&1
@@ -78,10 +78,7 @@ echo "user=mail
 password=$MARIADB_MAIL_PASSWD
 dbname=postfix
 table=users
-select_field=maildir
-where_field=id
-hosts=127.0.0.1
-additional_conditions = and enabled = 1" >> /etc/postfix/mysql_mailbox.cf
+query=SELECT maildir FROM users WHERE ((id='%s' AND regex IS NULL) OR '%s' REGEXP regex) AND enabled=1" >> /etc/postfix/mysql_mailbox.cf
 echo "user=mail
 password=$MARIADB_MAIL_PASSWD
 dbname=postfix
@@ -104,10 +101,71 @@ apt -y install certbot > /dev/null 2>&1
 ufw allow from any to any port 80 > /dev/null 2>&1
 certbot certonly --domain $SMTP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
 
+################ INSTALL POSTFIX SSL ################
+echo "Configuring SSL for Postfix"
 # Configuring STARTTLS
 sed -i "s|smtpd_tls_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem|smtpd_tls_cert_file=/etc/letsencrypt/live/$SMTP_DOMAIN_NAME/cert.pem|" /etc/postfix/main.cf
 sed -i "s|smtpd_tls_key_file=/etc/ssl/private/ssl-cert-snakeoil.key|smtpd_tls_key_file=/etc/letsencrypt/live/$SMTP_DOMAIN_NAME/privkey.pem|" /etc/postfix/main.cf
 
-# Restart postfix
+# Configuring SMTPS
+sed -i 's/#\(smtps     inet  n       -       y       -       -       smtpd\)/\1/' /etc/postfix/master.cf
+sed -i 's/#\(  -o smtpd_tls_wrappermode=yes\)/\1/' /etc/postfix/master.cf
+sed -i ':a;N;$!ba;s/#\(  -o smtpd_sasl_auth_enable=\)yes/\1no/2' /etc/postfix/master.cf
+sed -i ':a;N;$!ba;s/#\(  -o smtpd_relay_restrictions=\)permit_sasl_authenticated,reject/\1permit_mynetworks,reject/2' /etc/postfix/master.cf
+ufw allow from any to any port 465
+
+# Get TLSA record
+BEGIN_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----BEGIN CERTIFICATE-----$' /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
+END_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----END CERTIFICATE-----$' /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
+sed -n "$BEGIN_LAST_CERTIFICATE_LINE_NUMBER,$END_LAST_CERTIFICATE_LINE_NUMBERp" /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem > authority_certificate.pem
+$TLSA_SMTP_RECORD=$(openssl x509 -in authority_certificate.pem -outform DER | openssl dgst -sha256 -hex | awk '{print $NF}')
+
+# Configure SMTP submission
+sed -i 's/#\(submission inet n       -       y       -       -       smtpd\)/\1/' /etc/postfix/master.cf
+sed -i 's/#\(  -o smtpd_tls_security_level=encrypt\)/\1/' /etc/postfix/master.cf
+sed -i 's/#\(  -o smtpd_sasl_auth_enable=yes\)/\1/' /etc/postfix/master.cf
+sed -i 's/#\(  -o smtpd_tls_auth_only=yes\)/\1/' /etc/postfix/master.cf
+sed -i ':a;N;$!ba;s/#\(  -o smtpd_client_restrictions=\)$mua_client_restrictions/\1permit_sasl_authenticated,reject/1' /etc/postfix/master.cf
+sed -i 's/#\(  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject\)/\1/' /etc/postfix/master.cf
+ufw allow from any to any port 587
+
+################ INSTALL SASL ################
+echo "Installing and configuring SASL"
+apt install -y libsasl2-modules libsasl2-modules-sql libgsasl7 libauthen-sasl-cyrus-perl sasl2-bin libpam-mysql
+adduser postfix sasl
+mkdir -p /var/spool/postfix/var/run/saslauthd
+sed -i 's/START=no/START=yes/' /etc/default/saslauthd
+sed -i 's|OPTIONS="-c -m /var/run/saslauthd"|OPTIONS="-r -c -m /var/spool/postfix/var/run/saslauthd"|' /etc/default/saslauthd
+
+################ INSTALL POSTFIX SASL ################
+echo "Configuring SASL for Postfix"
+
+echo "smtpd_sasl_auth_enable = yes
+broken_sasl_auth_clients = no
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_local_domain =" >> /etc/postfix/main.cf
+
+echo "pwcheck_method: saslauthd
+mech_list: plain login cram-md5 digest-md5
+log_level: 7
+allow_plaintext: true
+auxprop_plugin: sql
+sql_engine: mysql
+sql_hostnames: 127.0.0.1
+sql_user: mail
+sql_passwd: $MARIADB_MAIL_PASSWD
+sql_database: postfix
+sql_select: select crypt from users where id=\'%u@%r\' and enabled = 1" >> /etc/postfix/sasl/smtpd.conf
+
+echo "auth required pam_mysql.so user=mail passwd=$MARIADB_MAIL_PASSWD host=127.0.0.1 db=postfix table=users usercolumn=id passwdcolumn=crypt crypt=1
+account sufficient pam_mysql.so user=mail passwd=$MARIADB_MAIL_PASSWD host=127.0.0.1 db=postfix table=users usercolumn=id passwdcolumn=crypt crypt=1" >> /etc/pam.d/smtp
+
+# Restart postfix and SASL auth deamon
+systemctl saslauthd restart
 systemctl postfix restart
+
 echo $SSHFP_RECORD
+echo "\n\n"
+echo "TLSA => _25._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
+echo "TLSA => _465._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
+echo "TLSA => _587._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"

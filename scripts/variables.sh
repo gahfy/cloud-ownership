@@ -7,6 +7,7 @@ MARIADB_ROOT_PASSWD="root_passwd"
 MARIADB_MAIL_PASSWD="mail_passwd"
 MAIL_ROOT_LOCALHOST_PASSWD="mail_root_passwd"
 MAIL_USER="johndoe@example.com"
+MAIL_USER_REGEX='^j\\..*@example\\.com$'
 # The MAIL_CERTBOT should be a valid existing email address. If the MX record has been set for the domain to this server, it can be the value of $MAIL_USER, otherwise, please enter a valid email address
 MAIL_CERTBOT=$MAIL_USER
 MAIL_USER_FULL_NAME="John Doe"

@@ -399,13 +399,13 @@ sudo sed -i 's/#\(  -o smtpd_tls_wrappermode=yes\)/\1/' /etc/postfix/master.cf
 Then, disable authentication on that port:
 
 ```
-sudo sed -i 's/#\(  -o smtpd_sasl_auth_enable=\)yes/\1no/' /etc/postfix/master.cf
+sudo sed -i ':a;N;$!ba;s/#\(  -o smtpd_sasl_auth_enable=\)yes/\1no/2' /etc/postfix/master.cf
 ```
 
 And finally, allow relay on this port for local addresses:
 
 ```
-sudo sed -i 's/#\(  -o smtpd_relay_restrictions=\)permit_sasl_authenticated,reject/\1permit_mynetworks,reject/' /etc/postfix/master.cf
+sudo sed -i ':a;N;$!ba;s/#\(  -o smtpd_relay_restrictions=\)permit_sasl_authenticated,reject/\1permit_mynetworks,reject/2' /etc/postfix/master.cf
 ```
 
 And you can now restart postfix:
