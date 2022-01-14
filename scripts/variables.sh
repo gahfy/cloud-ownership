@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 USERNAME_FOR_SSH="username"
 IP_CLIENT="1.2.3.4"
