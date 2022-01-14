@@ -102,7 +102,7 @@ systemctl postfix restart
 echo "Installing and configuring Certbot"
 apt -y install certbot > /dev/null 2>&1
 ufw allow from any to any port 80 > /dev/null 2>&1
-certbot certonly --domain $SMTP_DOMAIN_NAME --email $MAIL_USER --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
+certbot certonly --domain $SMTP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
 
 # Configuring STARTTLS
 sed -i "s|smtpd_tls_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem|smtpd_tls_cert_file=/etc/letsencrypt/live/$SMTP_DOMAIN_NAME/cert.pem|" /etc/postfix/main.cf
