@@ -24,11 +24,11 @@ echo "$USERNAME_FOR_SSH  ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 echo "Installing and configuring SSH"
 apt -y install openssh-server > /dev/null 2>&1
 ufw allow from $IP_CLIENT to any port 22 proto tcp > /dev/null 2>&1
-mkdir /home/$USERNAME/.ssh > /dev/null 2>&1
-echo $SSH_PUBLIC_KEY > /home/$USERNAME/.ssh/authorized_keys
-chmod 700 /home/$USERNAME/.ssh > /dev/null 2>&1
-chmod 600 /home/$USERNAME/.ssh/authorized_keys > /dev/null 2>&1
-chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh > /dev/null 2>&1
+mkdir /home/$USERNAME_FOR_SSH/.ssh > /dev/null 2>&1
+echo $SSH_PUBLIC_KEY > /home/$USERNAME_FOR_SSH/.ssh/authorized_keys
+chmod 700 /home/$USERNAME_FOR_SSH/.ssh > /dev/null 2>&1
+chmod 600 /home/$USERNAME_FOR_SSH/.ssh/authorized_keys > /dev/null 2>&1
+chown -R $USERNAME_FOR_SSH:$USERNAME_FOR_SSH /home/$USERNAME_FOR_SSH/.ssh > /dev/null 2>&1
 sed -i 's/#\(PubkeyAuthentication yes\)/\1/' /etc/ssh/sshd_config > /dev/null 2>&1
 sed -i 's/#\(PasswordAuthentication\) yes/\1 no/'  /etc/ssh/sshd_config > /dev/null 2>&1
 systemctl restart sshd > /dev/null 2>&1
