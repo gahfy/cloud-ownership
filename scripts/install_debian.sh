@@ -100,6 +100,7 @@ echo "Installing and configuring Certbot"
 apt -y install certbot > /dev/null 2>&1
 ufw allow from any to any port 80 > /dev/null 2>&1
 certbot certonly --domain $SMTP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
+certbot certonly --domain $IMAP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
 
 ################ INSTALL POSTFIX SSL ################
 echo "Configuring SSL for Postfix"
@@ -118,7 +119,7 @@ ufw allow from any to any port 465
 BEGIN_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----BEGIN CERTIFICATE-----$' /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
 END_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----END CERTIFICATE-----$' /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
 sed -n "$BEGIN_LAST_CERTIFICATE_LINE_NUMBER,$END_LAST_CERTIFICATE_LINE_NUMBERp" /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem > authority_certificate.pem
-$TLSA_SMTP_RECORD=$(openssl x509 -in authority_certificate.pem -outform DER | openssl dgst -sha256 -hex | awk '{print $NF}')
+TLSA_SMTP_RECORD=$(openssl x509 -in authority_certificate.pem -outform DER | openssl dgst -sha256 -hex | awk '{print $NF}')
 
 # Configure SMTP submission
 sed -i 's/#\(submission inet n       -       y       -       -       smtpd\)/\1/' /etc/postfix/master.cf
@@ -139,7 +140,6 @@ sed -i 's|OPTIONS="-c -m /var/run/saslauthd"|OPTIONS="-r -c -m /var/spool/postfi
 
 ################ INSTALL POSTFIX SASL ################
 echo "Configuring SASL for Postfix"
-
 echo "smtpd_sasl_auth_enable = yes
 broken_sasl_auth_clients = no
 smtpd_sasl_security_options = noanonymous
@@ -164,8 +164,51 @@ account sufficient pam_mysql.so user=mail passwd=$MARIADB_MAIL_PASSWD host=127.0
 systemctl saslauthd restart
 systemctl postfix restart
 
+################ INSTALL DOVECOT ################
+echo "Installing and configuring SASL"
+apt -y install dovecot-core dovecot-imapd dovecot-lmtpd dovecot-mysql
+sed -i 's|\(!include_try /usr/share/dovecot/protocols.d/\*.protocol\)|\1\nprotocols = imap lmtp|' /etc/dovecot/dovecot.conf
+sed -i 's/#\(disable_plaintext_auth = yes\)/\1/' /etc/dovecot/conf.d/10-auth.conf
+sed -i 's/\(auth_mechanisms = plain\)/\1 login/' /etc/dovecot/conf.d/10-auth.conf
+sed -i 's/\(!include auth-system.conf.ext\)/#\1/' /etc/dovecot/conf.d/10-auth.conf
+sed -i 's/#\(!include auth-sql.conf.ext\)/\1/' /etc/dovecot/conf.d/10-auth.conf
+sed -i 's|mail_location = mbox:~/mail:INBOX=/var/mail/%u|mail_location = maildir:/data/mail/virtual/%u|' /etc/dovecot/conf.d/10-mail.conf
+sed -i '0,/#separator =/{s//separator = ./}' /etc/dovecot/conf.d/10-mail.conf
+sed -i '0,/#prefix =/{s//prefix = INBOX./}' /etc/dovecot/conf.d/10-mail.conf
+sed -i 's/#\(mail_uid =\)/\1 5000/' /etc/dovecot/conf.d/10-mail.conf
+sed -i 's/#\(mail_gid =\)/\1 5000/' /etc/dovecot/conf.d/10-mail.conf
+sed -i 's/\(mail_privileged_group = \)mail/\1virtual/' /etc/dovecot/conf.d/10-mail.conf
+sed -i 's/inet_listener imap \{\n    #port = 143\n  \}/#inet_listener imap \{\n    #port = 143\n  #\}/' /etc/dovecot/conf.d/10-master.conf
+sed -i '0,/}/{s//#}/}' /etc/dovecot/conf.d/10-master.conf
+sed -i "s|ssl_cert = </etc/dovecot/private/dovecot.pem|ssl_cert = </etc/letsencrypt/live/$IMAP_DOMAIN_NAME/cert.pem|" /etc/dovecot/conf.d/10-ssl.conf
+sed -i "s|ssl_key = </etc/dovecot/private/dovecot.key|ssl_key = </etc/letsencrypt/live/$IMAP_DOMAIN_NAME/privkey.pem|" /etc/dovecot/conf.d/10-ssl.conf
+sed -i 's/#\(mail_max_userip_connections = 10\)/\10/' /etc/dovecot/conf.d/20-imap.conf
+sed -i ':a;N;$!ba;s/driver = sql/driver = prefetch/2' /etc/dovecot/conf.d/auth-sql.conf.ext
+sed -i ':a;N;$!ba;s|\(args = /etc/dovecot/dovecot-sql.conf.ext\)|#\1|2' /etc/dovecot/conf.d/auth-sql.conf.ext
+echo "#For database driver, we want mysql:
+driver = mysql
+
+#The connect string will point to the postfix database on the local machine,
+#with the user and password you defined when you set it up according to Flurdy.
+connect = host=127.0.0.1 dbname=postfix user=mail password=$MARIADB_MAIL_PASSWD
+
+#We'll be using the encrypted password from the mysql database:
+default_pass_scheme = CRYPT
+
+#Set the password query to point to the users table:
+password_query = SELECT id AS user, crypt AS password, CONCAT(home,'/',maildir) AS userdb_home, \
+                        uid AS userdb_uid, gid AS userdb_gid, CONCAT(home,'/',maildir) AS userdb_mail FROM users WHERE id='%u" >> /etc/dovecot/dovecot-sql.conf.ext
+
+systemctl restart dovecot
+ufw allow from any to any port 993
+BEGIN_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----BEGIN CERTIFICATE-----$' /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
+END_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----END CERTIFICATE-----$' /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
+sed -n "$BEGIN_LAST_CERTIFICATE_LINE_NUMBER,$END_LAST_CERTIFICATE_LINE_NUMBERp" /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem > authority_certificate.pem
+TLSA_IMAP_RECORD=$(openssl x509 -in authority_certificate.pem -outform DER | openssl dgst -sha256 -hex | awk '{print $NF}')
+
 echo $SSHFP_RECORD
 echo "\n\n"
 echo "TLSA => _25._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _465._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _587._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
+echo "TLSA => _993._tcp.$IMAP_DOMAIN_NAME => 2 0 1 $TLSA_IMAP_RECORD"
