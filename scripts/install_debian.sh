@@ -101,6 +101,7 @@ apt -y install certbot > /dev/null 2>&1
 ufw allow from any to any port 80 > /dev/null 2>&1
 certbot certonly --domain $SMTP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
 certbot certonly --domain $IMAP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
+certbot certonly --domain $ROUNDCUBE_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
 
 ################ INSTALL POSTFIX SSL ################
 echo "Configuring SSL for Postfix"
@@ -164,6 +165,37 @@ account sufficient pam_mysql.so user=mail passwd=$MARIADB_MAIL_PASSWD host=127.0
 systemctl saslauthd restart
 systemctl postfix restart
 
+################ INSTALL DKIM ################
+echo "Configuring DKIM for Postfix"
+apt install -y opendkim opendkim-tools
+echo 'AutoRestart             Yes
+AutoRestartRate         10/1h' >> /etc/opendkim.conf
+sed -i 's/UMask\t\t\t007/UMask\t\t\t002/' /etc/opendkim.conf
+sed -i 's/#LogWhy\t\t\tno/LogWhy\t\t\tyes/' /etc/opendkim.conf
+sed -i 's|#InternalHosts		192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12|ExternalIgnoreList      refile:/data/opendkim/TrustedHosts\nInternalHosts           refile:/data/opendkim/TrustedHosts\nKeyTable                refile:/data/opendkim/KeyTable\nSigningTable            refile:/data/opendkim/SigningTable\n|' /etc/opendkim.conf
+sed -i 's/#Mode\t\t\tsv/Mode\t\t\tsv/' /etc/opendkim.conf
+sed -i 's|PidFile\t\t\t/run/opendkim/opendkim.pid|PidFile\t\t\t/var/run/opendkim/opendkim.pid\nSignatureAlgorithm      rsa-sha256|' /etc/opendkim.conf
+sed -i 's/UserID\t\t\topendkim/UserID\t\t\topendkim:opendkim/' /etc/opendkim.conf
+sed -i 's|Socket\t\t\tlocal:/run/opendkim/opendkim.sock|Socket                  inet:12301@localhost|' /etc/opendkim.conf
+sed -i 's|SOCKET=local:$RUNDIR/opendkim.sock|SOCKET="inet:12301@localhost"|' /etc/default/opendkim
+echo 'milter_protocol = 2
+milter_default_action = accept
+smtpd_milters = inet:localhost:12301
+non_smtpd_milters = inet:localhost:12301' >> /etc/postfix/main.cf
+mkdir -p /data/opendkim/keys
+echo "127.0.0.1
+localhost
+192.168.0.1/24
+
+*.$MAIL_DOMAIN" >> /data/opendkim/TrustedHosts
+echo "mail._domainkey.$MAIL_DOMAIN $MAIL_DOMAIN:mail:/data/opendkim/keys/$MAIL_DOMAIN/mail.private" >> /data/opendkim/KeyTable
+echo "*@$MAIL_DOMAIN mail._domainkey.$MAIL_DOMAIN" >> /data/opendkim/SigningTable
+mkdir /data/opendkim/keys/$MAIL_DOMAIN
+opendkim-genkey -s mail -d $MAIL_DOMAIN
+mv mail.private /data/opendkim/keys/$MAIL_DOMAIN/
+mv mail.txt /data/opendkim/keys/$MAIL_DOMAIN/
+chown opendkim:opendkim /data/opendkim/keys/$MAIL_DOMAIN/mail.private
+
 ################ INSTALL DOVECOT ################
 echo "Installing and configuring SASL"
 apt -y install dovecot-core dovecot-imapd dovecot-lmtpd dovecot-mysql
@@ -205,6 +237,28 @@ BEGIN_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----BEGIN CERTIFICATE-----$' /et
 END_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----END CERTIFICATE-----$' /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
 sed -n "$BEGIN_LAST_CERTIFICATE_LINE_NUMBER,$END_LAST_CERTIFICATE_LINE_NUMBERp" /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem > authority_certificate.pem
 TLSA_IMAP_RECORD=$(openssl x509 -in authority_certificate.pem -outform DER | openssl dgst -sha256 -hex | awk '{print $NF}')
+
+################ INSTALL APACHE ################
+echo "Installing and configuring Apache"
+apt install -y apache2
+# Enable brotli, expires, and rewrite modules (required for RoundCube)
+a2enmod brotli expires headers rewrite ssl
+
+################ INSTALL PHP ################
+echo "Installing and configuring PHP"
+apt install -y php libapache2-mod-php php-dom php-mbstring php-intl php-mysql php-zip php-gd php-imagick
+sed -i 's/error_reporting = E_ALL \& ~E_DEPRECATED \& ~E_STRICT/error_reporting E_ALL \& ~E_NOTICE \& ~E_STRICT/' /etc/php/7.4/apache2/php.ini
+sed -i 's/;\(mbstring.func_overload = 0\)/\1/' /etc/php/7.4/apache2/php.ini
+sed -i 's/;\(pcre.backtrack_limit=\)100000/\1110000/' /etc/php/7.4/apache2/php.ini
+
+################ INSTALL Roundcube ################
+echo "Installing and configuring Roundcube"
+apt install -y roundcube
+cat /etc/apache2/sites-available/default-ssl.conf | grep -vE '^[[:space:]]*$' | grep -vE '^[[:space:]]*#' >> /etc/apache2/sites-available/roundcube.conf
+sed -i "s|SSLCertificateFile	/etc/ssl/certs/ssl-cert-snakeoil.pem|SSLCertificateFile	/etc/letsencrypt/live/$ROUNDCUBE_DOMAIN_NAME/cert.pem" /etc/apache2/sites-available/roundcube.conf
+sed -i "s|SSLCertificateKeyFile /etc/ssl/private/ssl-cert-snakeoil.key|SSLCertificateKeyFile /etc/letsencrypt/live/$ROUNDCUBE_DOMAIN_NAME/privkey.pem" /etc/apache2/sites-available/roundcube.conf
+sed -i "s|<VirtualHost _default_:443>|<VirtualHost _default_:443>\n\t\tInclude /etc/roundcube/apache.conf\n\t\tAlias / /var/lib/roundcube/|" /etc/apache2/sites-available/roundcube.conf
+sudo ufw allow from any to any port 443 proto tcp
 
 echo $SSHFP_RECORD
 echo "\n\n"
