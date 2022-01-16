@@ -87,6 +87,14 @@ select_field=destination
 where_field=mail
 hosts=127.0.0.1
 additional_conditions = and enabled = 1" >> /etc/postfix/mysql_domains.cf
+echo "user=mail
+password=$MARIADB_MAIL_PASSWD
+dbname=postfix
+table=aliases
+select_field=destination
+where_field=mail
+hosts=127.0.0.1
+additional_conditions = and enabled = 1" >> /etc/postfix/mysql_alias.cf
 chown root:postfix /etc/postfix/mysql_*
 chmod 0640 /etc/postfix/mysql_*
 
@@ -114,7 +122,7 @@ sed -i 's/#\(smtps     inet  n       -       y       -       -       smtpd\)/\1/
 sed -i 's/#\(  -o smtpd_tls_wrappermode=yes\)/\1/' /etc/postfix/master.cf
 sed -i ':a;N;$!ba;s/#\(  -o smtpd_sasl_auth_enable=\)yes/\1no/2' /etc/postfix/master.cf
 sed -i ':a;N;$!ba;s/#\(  -o smtpd_relay_restrictions=\)permit_sasl_authenticated,reject/\1permit_mynetworks,reject/2' /etc/postfix/master.cf
-ufw allow from any to any port 465
+ufw allow from any to any port 465 proto tcp > /dev/null 2>&1
 
 # Get TLSA record
 BEGIN_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----BEGIN CERTIFICATE-----$' /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
@@ -129,13 +137,13 @@ sed -i 's/#\(  -o smtpd_sasl_auth_enable=yes\)/\1/' /etc/postfix/master.cf
 sed -i 's/#\(  -o smtpd_tls_auth_only=yes\)/\1/' /etc/postfix/master.cf
 sed -i ':a;N;$!ba;s/#\(  -o smtpd_client_restrictions=\)$mua_client_restrictions/\1permit_sasl_authenticated,reject/1' /etc/postfix/master.cf
 sed -i 's/#\(  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject\)/\1/' /etc/postfix/master.cf
-ufw allow from any to any port 587
+ufw allow from any to any port 587 proto tcp > /dev/null 2>&1
 
 ################ INSTALL SASL ################
 echo "Installing and configuring SASL"
-apt install -y libsasl2-modules libsasl2-modules-sql libgsasl7 libauthen-sasl-cyrus-perl sasl2-bin libpam-mysql
-adduser postfix sasl
-mkdir -p /var/spool/postfix/var/run/saslauthd
+apt install -y libsasl2-modules libsasl2-modules-sql libgsasl7 libauthen-sasl-cyrus-perl sasl2-bin libpam-mysql > /dev/null 2>&1
+adduser postfix sasl > /dev/null 2>&1
+mkdir -p /var/spool/postfix/var/run/saslauthd > /dev/null 2>&1
 sed -i 's/START=no/START=yes/' /etc/default/saslauthd
 sed -i 's|OPTIONS="-c -m /var/run/saslauthd"|OPTIONS="-r -c -m /var/spool/postfix/var/run/saslauthd"|' /etc/default/saslauthd
 
@@ -147,7 +155,7 @@ smtpd_sasl_security_options = noanonymous
 smtpd_sasl_local_domain =" >> /etc/postfix/main.cf
 
 echo "pwcheck_method: saslauthd
-mech_list: plain login cram-md5 digest-md5
+mech_list: plain login cram-md5
 log_level: 7
 allow_plaintext: true
 auxprop_plugin: sql
@@ -156,18 +164,18 @@ sql_hostnames: 127.0.0.1
 sql_user: mail
 sql_passwd: $MARIADB_MAIL_PASSWD
 sql_database: postfix
-sql_select: select crypt from users where id=\'%u@%r\' and enabled = 1" >> /etc/postfix/sasl/smtpd.conf
+sql_select: select crypt from users where id='%u@%r' and enabled = 1" >> /etc/postfix/sasl/smtpd.conf
 
 echo "auth required pam_mysql.so user=mail passwd=$MARIADB_MAIL_PASSWD host=127.0.0.1 db=postfix table=users usercolumn=id passwdcolumn=crypt crypt=1
 account sufficient pam_mysql.so user=mail passwd=$MARIADB_MAIL_PASSWD host=127.0.0.1 db=postfix table=users usercolumn=id passwdcolumn=crypt crypt=1" >> /etc/pam.d/smtp
 
 # Restart postfix and SASL auth deamon
-systemctl saslauthd restart
-systemctl postfix restart
+systemctl restart saslauthd > /dev/null 2>&1
+systemctl restart postfix > /dev/null 2>&1
 
 ################ INSTALL DKIM ################
 echo "Configuring DKIM for Postfix"
-apt install -y opendkim opendkim-tools
+apt install -y opendkim opendkim-tools > /dev/null 2>&1
 echo 'AutoRestart             Yes
 AutoRestartRate         10/1h' >> /etc/opendkim.conf
 sed -i 's/UMask\t\t\t007/UMask\t\t\t002/' /etc/opendkim.conf
@@ -182,7 +190,7 @@ echo 'milter_protocol = 2
 milter_default_action = accept
 smtpd_milters = inet:localhost:12301
 non_smtpd_milters = inet:localhost:12301' >> /etc/postfix/main.cf
-mkdir -p /data/opendkim/keys
+mkdir -p /data/opendkim/keys > /dev/null 2>&1
 echo "127.0.0.1
 localhost
 192.168.0.1/24
@@ -190,16 +198,16 @@ localhost
 *.$MAIL_DOMAIN" >> /data/opendkim/TrustedHosts
 echo "mail._domainkey.$MAIL_DOMAIN $MAIL_DOMAIN:mail:/data/opendkim/keys/$MAIL_DOMAIN/mail.private" >> /data/opendkim/KeyTable
 echo "*@$MAIL_DOMAIN mail._domainkey.$MAIL_DOMAIN" >> /data/opendkim/SigningTable
-mkdir /data/opendkim/keys/$MAIL_DOMAIN
-opendkim-genkey -s mail -d $MAIL_DOMAIN
-mv mail.private /data/opendkim/keys/$MAIL_DOMAIN/
-mv mail.txt /data/opendkim/keys/$MAIL_DOMAIN/
-chown opendkim:opendkim /data/opendkim/keys/$MAIL_DOMAIN/mail.private
+mkdir /data/opendkim/keys/$MAIL_DOMAIN > /dev/null 2>&1
+opendkim-genkey -s mail -d $MAIL_DOMAIN > /dev/null 2>&1
+mv mail.private /data/opendkim/keys/$MAIL_DOMAIN/ > /dev/null 2>&1
+mv mail.txt /data/opendkim/keys/$MAIL_DOMAIN/ > /dev/null 2>&1
+chown -R opendkim:opendkim /data/opendkim > /dev/null 2>&1
 DKIM_RECORD=$(cat /etc/opendkim/keys/gahfy.io/mail.txt | tr '\n' ' ' | sed 's/mail._domainkey   IN      TXT     ( //' | sed "s/ )  ; ----- DKIM key mail for $MAIL_DOMAIN//"  | sed 's/" \t  "//g')
 
 ################ INSTALL DOVECOT ################
-echo "Installing and configuring SASL"
-apt -y install dovecot-core dovecot-imapd dovecot-lmtpd dovecot-mysql
+echo "Installing and configuring Dovecot"
+apt -y install dovecot-core dovecot-imapd dovecot-lmtpd dovecot-mysql > /dev/null 2>&1
 sed -i 's|\(!include_try /usr/share/dovecot/protocols.d/\*.protocol\)|\1\nprotocols = imap lmtp|' /etc/dovecot/dovecot.conf
 sed -i 's/#\(disable_plaintext_auth = yes\)/\1/' /etc/dovecot/conf.d/10-auth.conf
 sed -i 's/\(auth_mechanisms = plain\)/\1 login/' /etc/dovecot/conf.d/10-auth.conf
@@ -211,7 +219,7 @@ sed -i '0,/#prefix =/{s//prefix = INBOX./}' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/#\(mail_uid =\)/\1 5000/' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/#\(mail_gid =\)/\1 5000/' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/\(mail_privileged_group = \)mail/\1virtual/' /etc/dovecot/conf.d/10-mail.conf
-sed -i 's/inet_listener imap \{\n    #port = 143\n  \}/#inet_listener imap \{\n    #port = 143\n  #\}/' /etc/dovecot/conf.d/10-master.conf
+sed -i 's/inet_listener imap {/#inet_listener imap {/' /etc/dovecot/conf.d/10-master.conf
 sed -i '0,/}/{s//#}/}' /etc/dovecot/conf.d/10-master.conf
 sed -i "s|ssl_cert = </etc/dovecot/private/dovecot.pem|ssl_cert = </etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem|" /etc/dovecot/conf.d/10-ssl.conf
 sed -i "s|ssl_key = </etc/dovecot/private/dovecot.key|ssl_key = </etc/letsencrypt/live/$IMAP_DOMAIN_NAME/privkey.pem|" /etc/dovecot/conf.d/10-ssl.conf
@@ -230,10 +238,10 @@ default_pass_scheme = CRYPT
 
 #Set the password query to point to the users table:
 password_query = SELECT id AS user, crypt AS password, CONCAT(home,'/',maildir) AS userdb_home, \
-                        uid AS userdb_uid, gid AS userdb_gid, CONCAT(home,'/',maildir) AS userdb_mail FROM users WHERE id='%u" >> /etc/dovecot/dovecot-sql.conf.ext
+                        uid AS userdb_uid, gid AS userdb_gid, CONCAT(home,'/',maildir) AS userdb_mail FROM users WHERE id='%u'" >> /etc/dovecot/dovecot-sql.conf.ext
 
-systemctl restart dovecot
-ufw allow from any to any port 993
+systemctl restart dovecot > /dev/null 2>&1
+ufw allow from any to any port 993 proto tcp > /dev/null 2>&1
 BEGIN_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----BEGIN CERTIFICATE-----$' /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
 END_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----END CERTIFICATE-----$' /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
 sed -n "$BEGIN_LAST_CERTIFICATE_LINE_NUMBER,$END_LAST_CERTIFICATE_LINE_NUMBERp" /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem > authority_certificate.pem
@@ -241,31 +249,33 @@ TLSA_IMAP_RECORD=$(openssl x509 -in authority_certificate.pem -outform DER | ope
 
 ################ INSTALL APACHE ################
 echo "Installing and configuring Apache"
-apt install -y apache2
-a2enmod brotli expires headers rewrite ssl
+apt install -y apache2 > /dev/null 2>&1
+a2enmod brotli expires headers rewrite ssl > /dev/null 2>&1
 sed -i 's/\(Listen 80\)/#\1/' /etc/apache2/ports.conf
-a2dissite 000-default
+a2dissite 000-default > /dev/null 2>&1
 
 ################ INSTALL PHP ################
 echo "Installing and configuring PHP"
-apt install -y php libapache2-mod-php php-dom php-mbstring php-intl php-mysql php-zip php-gd php-imagick
+apt install -y php libapache2-mod-php php-dom php-mbstring php-intl php-mysql php-zip php-gd php-imagick > /dev/null 2>&1
 sed -i 's/error_reporting = E_ALL \& ~E_DEPRECATED \& ~E_STRICT/error_reporting E_ALL \& ~E_NOTICE \& ~E_STRICT/' /etc/php/7.4/apache2/php.ini
 sed -i 's/;\(mbstring.func_overload = 0\)/\1/' /etc/php/7.4/apache2/php.ini
 sed -i 's/;\(pcre.backtrack_limit=\)100000/\1110000/' /etc/php/7.4/apache2/php.ini
 
 ################ INSTALL Roundcube ################
 echo "Installing and configuring Roundcube"
-DEBIAN_FRONTEND=noninteractive apt install -y roundcube
+DEBIAN_FRONTEND=noninteractive apt install -y roundcube > /dev/null 2>&1
 sed -i "s/[a-zA-Z0-9]\{16,32\}/$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24 ; echo '')/" /etc/roundcube/config.inc.php
 sed -i 's|\(\$config\['"'"'default_host'"'"'\] = '"'"'\)\('"'"';\)|\1ssl://'"$IMAP_DOMAIN_NAME"'\2|' /etc/roundcube/config.inc.php
+sed -i 's|\(\$config\['"'"'smtp_server'"'"'\] = '"'"'\)localhost\('"'"';\)|\1tls://'"$SMTP_DOMAIN_NAME"'\2|' /etc/roundcube/config.inc.php
+echo '$config['"'"'smtp_auth_type'"'"'] = '"'"'LOGIN'"'"';' >> /etc/roundcube/config.inc.php
 cat /etc/apache2/sites-available/default-ssl.conf | grep -vE '^[[:space:]]*$' | grep -vE '^[[:space:]]*#' >> /etc/apache2/sites-available/roundcube.conf
-sed -i "s|SSLCertificateFile	/etc/ssl/certs/ssl-cert-snakeoil.pem|SSLCertificateFile	/etc/letsencrypt/live/$ROUNDCUBE_DOMAIN_NAME/fullchain.pem" /etc/apache2/sites-available/roundcube.conf
-sed -i "s|SSLCertificateKeyFile /etc/ssl/private/ssl-cert-snakeoil.key|SSLCertificateKeyFile /etc/letsencrypt/live/$ROUNDCUBE_DOMAIN_NAME/privkey.pem" /etc/apache2/sites-available/roundcube.conf
+sed -i "s|SSLCertificateFile\t/etc/ssl/certs/ssl-cert-snakeoil.pem|SSLCertificateFile	/etc/letsencrypt/live/$ROUNDCUBE_DOMAIN_NAME/fullchain.pem|" /etc/apache2/sites-available/roundcube.conf
+sed -i "s|SSLCertificateKeyFile /etc/ssl/private/ssl-cert-snakeoil.key|SSLCertificateKeyFile /etc/letsencrypt/live/$ROUNDCUBE_DOMAIN_NAME/privkey.pem|" /etc/apache2/sites-available/roundcube.conf
 sed -i "s|<VirtualHost _default_:443>|<VirtualHost _default_:443>\n\t\tInclude /etc/roundcube/apache.conf|" /etc/apache2/sites-available/roundcube.conf
 sed -i "s|DocumentRoot /var/www/html|DocumentRoot /var/lib/roundcube/public_html|" /etc/apache2/sites-available/roundcube.conf
-sudo ufw allow from any to any port 443 proto tcp
-a2ensite roundcube
-systemctl restart apache
+sudo ufw allow from any to any port 443 proto tcp > /dev/null 2>&1
+a2ensite roundcube > /dev/null 2>&1
+systemctl restart apache2 > /dev/null 2>&1
 
 echo $SSHFP_RECORD
 echo "\n\n"
