@@ -106,7 +106,7 @@ certbot certonly --domain $ROUNDCUBE_DOMAIN_NAME --email $MAIL_CERTBOT --agree-t
 ################ INSTALL POSTFIX SSL ################
 echo "Configuring SSL for Postfix"
 # Configuring STARTTLS
-sed -i "s|smtpd_tls_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem|smtpd_tls_cert_file=/etc/letsencrypt/live/$SMTP_DOMAIN_NAME/cert.pem|" /etc/postfix/main.cf
+sed -i "s|smtpd_tls_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem|smtpd_tls_cert_file=/etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem|" /etc/postfix/main.cf
 sed -i "s|smtpd_tls_key_file=/etc/ssl/private/ssl-cert-snakeoil.key|smtpd_tls_key_file=/etc/letsencrypt/live/$SMTP_DOMAIN_NAME/privkey.pem|" /etc/postfix/main.cf
 
 # Configuring SMTPS
@@ -195,6 +195,7 @@ opendkim-genkey -s mail -d $MAIL_DOMAIN
 mv mail.private /data/opendkim/keys/$MAIL_DOMAIN/
 mv mail.txt /data/opendkim/keys/$MAIL_DOMAIN/
 chown opendkim:opendkim /data/opendkim/keys/$MAIL_DOMAIN/mail.private
+DKIM_RECORD=$(cat /etc/opendkim/keys/gahfy.io/mail.txt | tr '\n' ' ' | sed 's/mail._domainkey   IN      TXT     ( //' | sed "s/ )  ; ----- DKIM key mail for $MAIL_DOMAIN//"  | sed 's/" \t  "//g')
 
 ################ INSTALL DOVECOT ################
 echo "Installing and configuring SASL"
@@ -212,7 +213,7 @@ sed -i 's/#\(mail_gid =\)/\1 5000/' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/\(mail_privileged_group = \)mail/\1virtual/' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/inet_listener imap \{\n    #port = 143\n  \}/#inet_listener imap \{\n    #port = 143\n  #\}/' /etc/dovecot/conf.d/10-master.conf
 sed -i '0,/}/{s//#}/}' /etc/dovecot/conf.d/10-master.conf
-sed -i "s|ssl_cert = </etc/dovecot/private/dovecot.pem|ssl_cert = </etc/letsencrypt/live/$IMAP_DOMAIN_NAME/cert.pem|" /etc/dovecot/conf.d/10-ssl.conf
+sed -i "s|ssl_cert = </etc/dovecot/private/dovecot.pem|ssl_cert = </etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem|" /etc/dovecot/conf.d/10-ssl.conf
 sed -i "s|ssl_key = </etc/dovecot/private/dovecot.key|ssl_key = </etc/letsencrypt/live/$IMAP_DOMAIN_NAME/privkey.pem|" /etc/dovecot/conf.d/10-ssl.conf
 sed -i 's/#\(mail_max_userip_connections = 10\)/\10/' /etc/dovecot/conf.d/20-imap.conf
 sed -i ':a;N;$!ba;s/driver = sql/driver = prefetch/2' /etc/dovecot/conf.d/auth-sql.conf.ext
@@ -241,8 +242,9 @@ TLSA_IMAP_RECORD=$(openssl x509 -in authority_certificate.pem -outform DER | ope
 ################ INSTALL APACHE ################
 echo "Installing and configuring Apache"
 apt install -y apache2
-# Enable brotli, expires, and rewrite modules (required for RoundCube)
 a2enmod brotli expires headers rewrite ssl
+sed -i 's/\(Listen 80\)/#\1/' /etc/apache2/ports.conf
+a2dissite 000-default
 
 ################ INSTALL PHP ################
 echo "Installing and configuring PHP"
@@ -253,12 +255,17 @@ sed -i 's/;\(pcre.backtrack_limit=\)100000/\1110000/' /etc/php/7.4/apache2/php.i
 
 ################ INSTALL Roundcube ################
 echo "Installing and configuring Roundcube"
-apt install -y roundcube
+DEBIAN_FRONTEND=noninteractive apt install -y roundcube
+sed -i "s/[a-zA-Z0-9]\{16,32\}/$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24 ; echo '')/" /etc/roundcube/config.inc.php
+sed -i 's|\(\$config\['"'"'default_host'"'"'\] = '"'"'\)\('"'"';\)|\1ssl://'"$IMAP_DOMAIN_NAME"'\2|' /etc/roundcube/config.inc.php
 cat /etc/apache2/sites-available/default-ssl.conf | grep -vE '^[[:space:]]*$' | grep -vE '^[[:space:]]*#' >> /etc/apache2/sites-available/roundcube.conf
-sed -i "s|SSLCertificateFile	/etc/ssl/certs/ssl-cert-snakeoil.pem|SSLCertificateFile	/etc/letsencrypt/live/$ROUNDCUBE_DOMAIN_NAME/cert.pem" /etc/apache2/sites-available/roundcube.conf
+sed -i "s|SSLCertificateFile	/etc/ssl/certs/ssl-cert-snakeoil.pem|SSLCertificateFile	/etc/letsencrypt/live/$ROUNDCUBE_DOMAIN_NAME/fullchain.pem" /etc/apache2/sites-available/roundcube.conf
 sed -i "s|SSLCertificateKeyFile /etc/ssl/private/ssl-cert-snakeoil.key|SSLCertificateKeyFile /etc/letsencrypt/live/$ROUNDCUBE_DOMAIN_NAME/privkey.pem" /etc/apache2/sites-available/roundcube.conf
-sed -i "s|<VirtualHost _default_:443>|<VirtualHost _default_:443>\n\t\tInclude /etc/roundcube/apache.conf\n\t\tAlias / /var/lib/roundcube/|" /etc/apache2/sites-available/roundcube.conf
+sed -i "s|<VirtualHost _default_:443>|<VirtualHost _default_:443>\n\t\tInclude /etc/roundcube/apache.conf|" /etc/apache2/sites-available/roundcube.conf
+sed -i "s|DocumentRoot /var/www/html|DocumentRoot /var/lib/roundcube/public_html|" /etc/apache2/sites-available/roundcube.conf
 sudo ufw allow from any to any port 443 proto tcp
+a2ensite roundcube
+systemctl restart apache
 
 echo $SSHFP_RECORD
 echo "\n\n"
@@ -266,3 +273,4 @@ echo "TLSA => _25._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _465._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _587._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _993._tcp.$IMAP_DOMAIN_NAME => 2 0 1 $TLSA_IMAP_RECORD"
+echo "TXT => mail._domainkey.$MAIL_DOMAIN => $DKIM_RECORD"
