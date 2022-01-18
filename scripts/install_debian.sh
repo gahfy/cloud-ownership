@@ -101,15 +101,15 @@ chmod 0640 /etc/postfix/mysql_*
 # Disable authentication on port 25, then open the port to any
 sed -i 's/permit_sasl_authenticated //' /etc/postfix/main.cf
 ufw allow from any to any port 25 > /dev/null 2>&1
-systemctl postfix restart
+systemctl restart postfix
 
 ################ INSTALL CERTBOT ################
 echo "Installing and configuring Certbot"
 apt -y install certbot > /dev/null 2>&1
 ufw allow from any to any port 80 > /dev/null 2>&1
-certbot certonly --domain $SMTP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
-certbot certonly --domain $IMAP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
-certbot certonly --domain $ROUNDCUBE_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email > /dev/null 2>&1
+certbot certonly --domain $SMTP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email --keep-until-expiring > /dev/null 2>&1
+certbot certonly --domain $IMAP_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email --keep-until-expiring > /dev/null 2>&1
+certbot certonly --domain $ROUNDCUBE_DOMAIN_NAME --email $MAIL_CERTBOT --agree-tos  --standalone --no-eff-email --keep-until-expiring > /dev/null 2>&1
 
 ################ INSTALL POSTFIX SSL ################
 echo "Configuring SSL for Postfix"
@@ -127,7 +127,7 @@ ufw allow from any to any port 465 proto tcp > /dev/null 2>&1
 # Get TLSA record
 BEGIN_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----BEGIN CERTIFICATE-----$' /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
 END_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----END CERTIFICATE-----$' /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
-sed -n "$BEGIN_LAST_CERTIFICATE_LINE_NUMBER,$END_LAST_CERTIFICATE_LINE_NUMBERp" /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem > authority_certificate.pem
+sed -n "${BEGIN_LAST_CERTIFICATE_LINE_NUMBER},${END_LAST_CERTIFICATE_LINE_NUMBER}p" /etc/letsencrypt/live/$SMTP_DOMAIN_NAME/fullchain.pem > authority_certificate.pem
 TLSA_SMTP_RECORD=$(openssl x509 -in authority_certificate.pem -outform DER | openssl dgst -sha256 -hex | awk '{print $NF}')
 
 # Configure SMTP submission
@@ -203,7 +203,7 @@ opendkim-genkey -s mail -d $MAIL_DOMAIN > /dev/null 2>&1
 mv mail.private /data/opendkim/keys/$MAIL_DOMAIN/ > /dev/null 2>&1
 mv mail.txt /data/opendkim/keys/$MAIL_DOMAIN/ > /dev/null 2>&1
 chown -R opendkim:opendkim /data/opendkim > /dev/null 2>&1
-DKIM_RECORD=$(cat /etc/opendkim/keys/gahfy.io/mail.txt | tr '\n' ' ' | sed 's/mail._domainkey   IN      TXT     ( //' | sed "s/ )  ; ----- DKIM key mail for $MAIL_DOMAIN//"  | sed 's/" \t  "//g')
+DKIM_RECORD=$(cat /data/opendkim/keys/gahfy.io/mail.txt | tr '\n' ' ' | sed 's/mail._domainkey   IN      TXT     ( //' | sed "s/ )  ; ----- DKIM key mail for $MAIL_DOMAIN//"  | sed 's/" \t  "//g')
 
 ################ INSTALL DOVECOT ################
 echo "Installing and configuring Dovecot"
@@ -214,8 +214,8 @@ sed -i 's/\(auth_mechanisms = plain\)/\1 login/' /etc/dovecot/conf.d/10-auth.con
 sed -i 's/\(!include auth-system.conf.ext\)/#\1/' /etc/dovecot/conf.d/10-auth.conf
 sed -i 's/#\(!include auth-sql.conf.ext\)/\1/' /etc/dovecot/conf.d/10-auth.conf
 sed -i 's|mail_location = mbox:~/mail:INBOX=/var/mail/%u|mail_location = maildir:/data/mail/virtual/%u|' /etc/dovecot/conf.d/10-mail.conf
-sed -i '0,/#separator =/{s//separator = ./}' /etc/dovecot/conf.d/10-mail.conf
-sed -i '0,/#prefix =/{s//prefix = INBOX./}' /etc/dovecot/conf.d/10-mail.conf
+sed -i '0,/#separator =/separator = ./' /etc/dovecot/conf.d/10-mail.conf
+sed -i '0,/#prefix =/prefix = INBOX./' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/#\(mail_uid =\)/\1 5000/' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/#\(mail_gid =\)/\1 5000/' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/\(mail_privileged_group = \)mail/\1virtual/' /etc/dovecot/conf.d/10-mail.conf
@@ -244,7 +244,7 @@ systemctl restart dovecot > /dev/null 2>&1
 ufw allow from any to any port 993 proto tcp > /dev/null 2>&1
 BEGIN_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----BEGIN CERTIFICATE-----$' /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
 END_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----END CERTIFICATE-----$' /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem | cut -f1 -d: | tail -n 1)
-sed -n "$BEGIN_LAST_CERTIFICATE_LINE_NUMBER,$END_LAST_CERTIFICATE_LINE_NUMBERp" /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem > authority_certificate.pem
+sed -n "${BEGIN_LAST_CERTIFICATE_LINE_NUMBER},${END_LAST_CERTIFICATE_LINE_NUMBER}p" /etc/letsencrypt/live/$IMAP_DOMAIN_NAME/fullchain.pem > authority_certificate.pem
 TLSA_IMAP_RECORD=$(openssl x509 -in authority_certificate.pem -outform DER | openssl dgst -sha256 -hex | awk '{print $NF}')
 
 ################ INSTALL APACHE ################
