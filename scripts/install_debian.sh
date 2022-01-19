@@ -2,7 +2,40 @@
 
 #Include variables.sh
 source $(dirname $0)/variables.sh
+
+# Get variables from server configuration
+SERVER_HOSTNAME=$(hostname)
+SERVER_DOMAIN=$(hostname -d)
 SERVER_FQDN=$(hostname -f)
+SERVER_IP=$(hostname -i)
+
+# Updating Njal.la A record if needed
+HAS_DOMAIN=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"get-domain", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_DOMAIN"'"' | wc -l)
+if [ $HAS_DOMAIN = '0' ]
+then
+  # Check that Njal.la has the right A record (normally it should be the case, as configuration asks for reverse DNS)
+  GOOD_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "A", "content": "'"$SERVER_IP"'"' | wc -l)
+
+  # If there is no correct record
+  if [ $GOOD_RECORD = '0' ]
+  then
+    WRONG_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "A", "content": "'"$SERVER_IP"'"' | wc -l)
+    if [ $WRONG_RECORD = '0' ]
+    then
+      # Add A record
+      echo "Adding A record"
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"add-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "name": "'"$SERVER_HOSTNAME"'", "content": "'"$SERVER_IP"'", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
+    else
+      # Edit record
+      echo "Edit record to match the IP address of this server"
+      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]\+\), "name": "'"$SERVER_HOSTNAME"'".*$/\1/g')
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"edit-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "id": '"$RECORD_ID"', "content": "'"$SERVER_IP"'", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
+    fi
+  else
+    echo "Njal.la domain has already an A record pointing to this server"
+else
+  echo "Won't configure Njal.la as we cannot find the domain of the server"
+fi
 
 # Update Debian
 echo "Initialization and update of the OS"
@@ -32,7 +65,7 @@ chown -R $USERNAME_FOR_SSH:$USERNAME_FOR_SSH /home/$USERNAME_FOR_SSH/.ssh > /dev
 sed -i 's/#\(PubkeyAuthentication yes\)/\1/' /etc/ssh/sshd_config > /dev/null 2>&1
 sed -i 's/#\(PasswordAuthentication\) yes/\1 no/'  /etc/ssh/sshd_config > /dev/null 2>&1
 systemctl restart sshd > /dev/null 2>&1
-SSHFP_RECORD="Add the following record to your DNS:\n$(ssh-keygen -r $SERVER_FQDN)"
+echo "Add the following record to your DNS:\n$(ssh-keygen -r $SERVER_FQDN)" > /home/$USERNAME/
 
 ################ INSTALL MARIADB ################
 echo "Installing and configuring MariaDB"
@@ -52,7 +85,7 @@ mysql -u mail -p$MARIADB_MAIL_PASSWD -e "CREATE TABLE postfix.users (id varchar(
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.domains (domain) VALUES ('localhost'), ('localhost.localdomain');"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.aliases (mail,destination) VALUES('postmaster@localhost','root@localhost'),('sysadmin@localhost','root@localhost'),('webmaster@localhost','root@localhost'),('abuse@localhost','root@localhost'),('root@localhost','root@localhost'),('@localhost','root@localhost'),('@localhost.localdomain','@localhost');"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.users (id,name,maildir,crypt) VALUES ('root@localhost','root','root/',encrypt('$MAIL_ROOT_LOCALHOST_PASSWD', CONCAT('\$5\$', MD5(RAND()))) );"
-mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.domains (domain) VALUES ('$MAIL_DOMAIN');"
+mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.domains (domain) VALUES ('$DOMAIN');"
 mysql -u mail -p$MARIADB_MAIL_PASSWD -e "INSERT INTO postfix.users (id,name,maildir,crypt, regex) VALUES ('$MAIL_USER','$MAIL_USER_FULL_NAME','$MAIL_USER_FOLDER/',encrypt('$MAIL_USER_PASSWD', CONCAT('\$5\$', MD5(RAND()))), '$MAIL_USER_REGEX' );"
 
 # Install Postfix and Postfix-Mysql
@@ -195,15 +228,15 @@ echo "127.0.0.1
 localhost
 192.168.0.1/24
 
-*.$MAIL_DOMAIN" >> /data/opendkim/TrustedHosts
-echo "mail._domainkey.$MAIL_DOMAIN $MAIL_DOMAIN:mail:/data/opendkim/keys/$MAIL_DOMAIN/mail.private" >> /data/opendkim/KeyTable
-echo "*@$MAIL_DOMAIN mail._domainkey.$MAIL_DOMAIN" >> /data/opendkim/SigningTable
-mkdir /data/opendkim/keys/$MAIL_DOMAIN > /dev/null 2>&1
-opendkim-genkey -s mail -d $MAIL_DOMAIN > /dev/null 2>&1
-mv mail.private /data/opendkim/keys/$MAIL_DOMAIN/ > /dev/null 2>&1
-mv mail.txt /data/opendkim/keys/$MAIL_DOMAIN/ > /dev/null 2>&1
+*.$DOMAIN" >> /data/opendkim/TrustedHosts
+echo "mail._domainkey.$DOMAIN $DOMAIN:mail:/data/opendkim/keys/$DOMAIN/mail.private" >> /data/opendkim/KeyTable
+echo "*@$DOMAIN mail._domainkey.$DOMAIN" >> /data/opendkim/SigningTable
+mkdir /data/opendkim/keys/$DOMAIN > /dev/null 2>&1
+opendkim-genkey -s mail -d $DOMAIN > /dev/null 2>&1
+mv mail.private /data/opendkim/keys/$DOMAIN/ > /dev/null 2>&1
+mv mail.txt /data/opendkim/keys/$DOMAIN/ > /dev/null 2>&1
 chown -R opendkim:opendkim /data/opendkim > /dev/null 2>&1
-DKIM_RECORD=$(cat /data/opendkim/keys/gahfy.io/mail.txt | tr '\n' ' ' | sed 's/mail._domainkey   IN      TXT     ( //' | sed "s/ )  ; ----- DKIM key mail for $MAIL_DOMAIN//"  | sed 's/" \t  "//g')
+DKIM_RECORD=$(cat /data/opendkim/keys/gahfy.io/mail.txt | tr '\n' ' ' | sed 's/mail._domainkey   IN      TXT     ( //' | sed "s/ )  ; ----- DKIM key mail for $DOMAIN//"  | sed 's/" \t  "//g')
 
 ################ INSTALL DOVECOT ################
 echo "Installing and configuring Dovecot"
@@ -283,4 +316,4 @@ echo "TLSA => _25._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _465._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _587._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _993._tcp.$IMAP_DOMAIN_NAME => 2 0 1 $TLSA_IMAP_RECORD"
-echo "TXT => mail._domainkey.$MAIL_DOMAIN => $DKIM_RECORD"
+echo "TXT => mail._domainkey.$DOMAIN => $DKIM_RECORD"
