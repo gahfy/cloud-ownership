@@ -9,9 +9,14 @@ SERVER_DOMAIN=$(hostname -d)
 SERVER_FQDN=$(hostname -f)
 SERVER_IP=$(hostname -i)
 
+# Initialize passwords
+MARIADB_ROOT_PASSWD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24 ; echo '')
+MARIADB_MAIL_PASSWD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24 ; echo '')
+MAIL_ROOT_LOCALHOST_PASSWD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24 ; echo '')
+
 # Updating Njal.la A record if needed
 HAS_DOMAIN=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"get-domain", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_DOMAIN"'"' | wc -l)
-if [ $HAS_DOMAIN = '0' ]
+if [ $HAS_DOMAIN != '0' ]
 then
   # Check that Njal.la has the right A record (normally it should be the case, as configuration asks for reverse DNS)
   GOOD_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "A", "content": "'"$SERVER_IP"'"' | wc -l)
@@ -33,6 +38,7 @@ then
     fi
   else
     echo "Njal.la domain has already an A record pointing to this server"
+  fi
 else
   echo "Won't configure Njal.la as we cannot find the domain of the server"
 fi
@@ -66,6 +72,131 @@ sed -i 's/#\(PubkeyAuthentication yes\)/\1/' /etc/ssh/sshd_config > /dev/null 2>
 sed -i 's/#\(PasswordAuthentication\) yes/\1 no/'  /etc/ssh/sshd_config > /dev/null 2>&1
 systemctl restart sshd > /dev/null 2>&1
 echo "Add the following record to your DNS:\n$(ssh-keygen -r $SERVER_FQDN)" > /home/$USERNAME/
+RSA_SHA1_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/^.*$SERVER_FQDN IN SSHFP 1 1 \([a-z0-9]\+\).*/\1/g")
+RSA_SHA256_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/^.*$SERVER_FQDN IN SSHFP 1 2 \([a-z0-9]\+\).*/\1/g")
+ECDSA_SHA1_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/^.*$SERVER_FQDN IN SSHFP 3 1 \([a-z0-9]\+\).*/\1/g")
+ECDSA_SHA256_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/^.*$SERVER_FQDN IN SSHFP 3 2 \([a-z0-9]\+\).*/\1/g")
+ED25519_SHA1_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/^.*$SERVER_FQDN IN SSHFP 4 2 \([a-z0-9]\+\).*/\1/g")
+ED25519_SHA256_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/^.*$SERVER_FQDN IN SSHFP 4 2 \([a-z0-9]\+\).*/\1/g")
+if [ $HAS_DOMAIN != '0' ]
+then
+  HAS_GOOD_RSA_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$RSA_SHA1_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 1, "ssh_type": 1' | wc -l)
+  if [ $HAS_GOOD_RSA_SHA1 != '0' ]
+  then
+    HAS_WRONG_RSA_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 1, "ssh_type": 1' | wc -l)
+    if [ $HAS_WRONG_RSA_SHA1 = '0' ]
+    then
+      # Add SSHFP record
+      echo "Adding SSHFP RSA SHA1 record"
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"add-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "name": "'"$SERVER_HOSTNAME"'", "content": "'"$RSA_SHA1_SSHFP_RECORD"'", "ttl": "86400", "type": "SSHFP", "ssh_algorithm": 1, "ssh_type": 1 }}' https://njal.la/api/1/
+    else
+      # Edit SSHFP record
+      echo "Edit SSHFP RSA SHA1 record"
+      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]*", "ttl": [0-9]*, "ssh_algorithm": 1, "ssh_type": 1.*$/\1/g')
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"edit-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "id": '"$RECORD_ID"', "content": "'"$RSA_SHA1_SSHFP_RECORD"'"}}' https://njal.la/api/1/
+    fi
+  else
+    echo "Njal.la domain has already an SSHFP RSA SHA1 record pointing to this SSH instance"
+  fi
+
+  HAS_GOOD_RSA_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$RSA_SHA256_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 1, "ssh_type": 2' | wc -l)
+  if [ $HAS_GOOD_RSA_SHA256 != '0' ]
+  then
+    HAS_WRONG_RSA_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 1, "ssh_type": 2' | wc -l)
+    if [ $HAS_WRONG_RSA_SHA256 = '0' ]
+    then
+      # Add SSHFP record
+      echo "Adding SSHFP RSA SHA256 record"
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"add-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "name": "'"$SERVER_HOSTNAME"'", "content": "'"$RSA_SHA256_SSHFP_RECORD"'", "ttl": "86400", "type": "SSHFP", "ssh_algorithm": 1, "ssh_type": 2 }}' https://njal.la/api/1/
+    else
+      # Edit SSHFP record
+      echo "Edit SSHFP RSA SHA256 record"
+      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]*", "ttl": [0-9]*, "ssh_algorithm": 1, "ssh_type": 2.*$/\1/g')
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"edit-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "id": '"$RECORD_ID"', "content": "'"$RSA_SHA256_SSHFP_RECORD"'"}}' https://njal.la/api/1/
+    fi
+  else
+    echo "Njal.la domain has already an SSHFP RSA SHA256 record pointing to this SSH instance"
+  fi
+
+  HAS_GOOD_ECDSA_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$ECDSA_SHA1_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 3, "ssh_type": 1' | wc -l)
+  if [ $HAS_GOOD_ECDSA_SHA1 != '0' ]
+  then
+    HAS_WRONG_ECDSA_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 3, "ssh_type": 1' | wc -l)
+    if [ $HAS_WRONG_ECDSA_SHA1 = '0' ]
+    then
+      # Add SSHFP record
+      echo "Adding SSHFP ECDSA SHA1 record"
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"add-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "name": "'"$SERVER_HOSTNAME"'", "content": "'"$ECDSA_SHA1_SSHFP_RECORD"'", "ttl": "86400", "type": "SSHFP", "ssh_algorithm": 3, "ssh_type": 1 }}' https://njal.la/api/1/
+    else
+      # Edit SSHFP record
+      echo "Edit SSHFP ECDSA SHA1 record"
+      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]*", "ttl": [0-9]*, "ssh_algorithm": 3, "ssh_type": 1.*$/\1/g')
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"edit-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "id": '"$RECORD_ID"', "content": "'"$ECDSA_SHA1_SSHFP_RECORD"'"}}' https://njal.la/api/1/
+    fi
+  else
+    echo "Njal.la domain has already an SSHFP ECDSA SHA1 record pointing to this SSH instance"
+  fi
+
+  HAS_GOOD_ECDSA_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$ECDSA_SHA256_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 3, "ssh_type": 2' | wc -l)
+  if [ $HAS_GOOD_ECDSA_SHA256 != '0' ]
+  then
+    HAS_WRONG_ECDSA_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 3, "ssh_type": 2' | wc -l)
+    if [ $HAS_WRONG_ECDSA_SHA256 = '0' ]
+    then
+      # Add SSHFP record
+      echo "Adding SSHFP ECDSA SHA256 record"
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"add-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "name": "'"$SERVER_HOSTNAME"'", "content": "'"$ECDSA_SHA256_SSHFP_RECORD"'", "ttl": "86400", "type": "SSHFP", "ssh_algorithm": 3, "ssh_type": 2 }}' https://njal.la/api/1/
+    else
+      # Edit SSHFP record
+      echo "Edit SSHFP ECDSA SHA256 record"
+      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]*", "ttl": [0-9]*, "ssh_algorithm": 3, "ssh_type": 2.*$/\1/g')
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"edit-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "id": '"$RECORD_ID"', "content": "'"$ECDSA_SHA256_SSHFP_RECORD"'"}}' https://njal.la/api/1/
+    fi
+  else
+    echo "Njal.la domain has already an SSHFP ECDSA SHA256 record pointing to this SSH instance"
+  fi
+
+  HAS_GOOD_ED25519_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$ED25519_SHA1_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 4, "ssh_type": 1' | wc -l)
+  if [ $HAS_GOOD_ED25519_SHA1 != '0' ]
+  then
+    HAS_WRONG_ED25519_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 4, "ssh_type": 1' | wc -l)
+    if [ $HAS_WRONG_ED25519_SHA1 = '0' ]
+    then
+      # Add SSHFP record
+      echo "Adding SSHFP ED25519 SHA1 record"
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"add-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "name": "'"$SERVER_HOSTNAME"'", "content": "'"$ED25519_SHA1_SSHFP_RECORD"'", "ttl": "86400", "type": "SSHFP", "ssh_algorithm": 4, "ssh_type": 1 }}' https://njal.la/api/1/
+    else
+      # Edit SSHFP record
+      echo "Edit SSHFP ED25519 SHA1 record"
+      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]*", "ttl": [0-9]*, "ssh_algorithm": 4, "ssh_type": 1.*$/\1/g')
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"edit-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "id": '"$RECORD_ID"', "content": "'"$ED25519_SHA1_SSHFP_RECORD"'"}}' https://njal.la/api/1/
+    fi
+  else
+    echo "Njal.la domain has already an SSHFP ED25519 SHA1 record pointing to this SSH instance"
+  fi
+
+  HAS_GOOD_ED25519_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$ED25519_SHA256_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 4, "ssh_type": 2' | wc -l)
+  if [ $HAS_GOOD_ED25519_SHA256 != '0' ]
+  then
+    HAS_WRONG_ED25519_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 4, "ssh_type": 2' | wc -l)
+    if [ $HAS_WRONG_ED25519_SHA256 = '0' ]
+    then
+      # Add SSHFP record
+      echo "Adding SSHFP ED25519 SHA256 record"
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"add-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "name": "'"$SERVER_HOSTNAME"'", "content": "'"$ED25519_SHA256_SSHFP_RECORD"'", "ttl": "86400", "type": "SSHFP", "ssh_algorithm": 4, "ssh_type": 2 }}' https://njal.la/api/1/
+    else
+      # Edit SSHFP record
+      echo "Edit SSHFP ECDSA ED25519 record"
+      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]*", "ttl": [0-9]*, "ssh_algorithm": 4, "ssh_type": 2.*$/\1/g')
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"edit-record", "params": {"domain": "'"$SERVER_DOMAIN"'", "id": '"$RECORD_ID"', "content": "'"$ED25519_SHA256_SSHFP_RECORD"'"}}' https://njal.la/api/1/
+    fi
+  else
+    echo "Njal.la domain has already an SSHFP ED25519 SHA256 record pointing to this SSH instance"
+  fi
+else
+  echo "Won't configure Njal.la for SSHFP as we cannot find the domain of the server"
+fi
+
 
 ################ INSTALL MARIADB ################
 echo "Installing and configuring MariaDB"
