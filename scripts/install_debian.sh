@@ -71,7 +71,6 @@ chown -R $USERNAME_FOR_SSH:$USERNAME_FOR_SSH /home/$USERNAME_FOR_SSH/.ssh > /dev
 sed -i 's/#\(PubkeyAuthentication yes\)/\1/' /etc/ssh/sshd_config > /dev/null 2>&1
 sed -i 's/#\(PasswordAuthentication\) yes/\1 no/'  /etc/ssh/sshd_config > /dev/null 2>&1
 systemctl restart sshd > /dev/null 2>&1
-echo "Add the following record to your DNS:\n$(ssh-keygen -r $SERVER_FQDN)" > /home/$USERNAME/
 RSA_SHA1_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/^.*$SERVER_FQDN IN SSHFP 1 1 \([a-z0-9]\+\).*/\1/g")
 RSA_SHA256_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/^.*$SERVER_FQDN IN SSHFP 1 2 \([a-z0-9]\+\).*/\1/g")
 ECDSA_SHA1_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/^.*$SERVER_FQDN IN SSHFP 3 1 \([a-z0-9]\+\).*/\1/g")
@@ -81,7 +80,7 @@ ED25519_SHA256_SSHFP_RECORD=$(ssh-keygen -r $SERVER_FQDN | tr '\n' ' ' | sed "s/
 if [ $HAS_DOMAIN != '0' ]
 then
   HAS_GOOD_RSA_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$RSA_SHA1_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 1, "ssh_type": 1' | wc -l)
-  if [ $HAS_GOOD_RSA_SHA1 != '0' ]
+  if [ $HAS_GOOD_RSA_SHA1 = '0' ]
   then
     HAS_WRONG_RSA_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 1, "ssh_type": 1' | wc -l)
     if [ $HAS_WRONG_RSA_SHA1 = '0' ]
@@ -100,7 +99,7 @@ then
   fi
 
   HAS_GOOD_RSA_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$RSA_SHA256_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 1, "ssh_type": 2' | wc -l)
-  if [ $HAS_GOOD_RSA_SHA256 != '0' ]
+  if [ $HAS_GOOD_RSA_SHA256 = '0' ]
   then
     HAS_WRONG_RSA_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 1, "ssh_type": 2' | wc -l)
     if [ $HAS_WRONG_RSA_SHA256 = '0' ]
@@ -119,7 +118,7 @@ then
   fi
 
   HAS_GOOD_ECDSA_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$ECDSA_SHA1_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 3, "ssh_type": 1' | wc -l)
-  if [ $HAS_GOOD_ECDSA_SHA1 != '0' ]
+  if [ $HAS_GOOD_ECDSA_SHA1 = '0' ]
   then
     HAS_WRONG_ECDSA_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 3, "ssh_type": 1' | wc -l)
     if [ $HAS_WRONG_ECDSA_SHA1 = '0' ]
@@ -138,7 +137,7 @@ then
   fi
 
   HAS_GOOD_ECDSA_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$ECDSA_SHA256_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 3, "ssh_type": 2' | wc -l)
-  if [ $HAS_GOOD_ECDSA_SHA256 != '0' ]
+  if [ $HAS_GOOD_ECDSA_SHA256 = '0' ]
   then
     HAS_WRONG_ECDSA_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 3, "ssh_type": 2' | wc -l)
     if [ $HAS_WRONG_ECDSA_SHA256 = '0' ]
@@ -157,7 +156,7 @@ then
   fi
 
   HAS_GOOD_ED25519_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$ED25519_SHA1_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 4, "ssh_type": 1' | wc -l)
-  if [ $HAS_GOOD_ED25519_SHA1 != '0' ]
+  if [ $HAS_GOOD_ED25519_SHA1 = '0' ]
   then
     HAS_WRONG_ED25519_SHA1=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 4, "ssh_type": 1' | wc -l)
     if [ $HAS_WRONG_ED25519_SHA1 = '0' ]
@@ -176,7 +175,7 @@ then
   fi
 
   HAS_GOOD_ED25519_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "'"$ED25519_SHA256_SSHFP_RECORD"'", "ttl": [0-9]\+, "ssh_algorithm": 4, "ssh_type": 2' | wc -l)
-  if [ $HAS_GOOD_ED25519_SHA256 != '0' ]
+  if [ $HAS_GOOD_ED25519_SHA256 = '0' ]
   then
     HAS_WRONG_ED25519_SHA256=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla $NJALLA_TOKEN" --data '{"method":"list-records", "params": {"domain": "'"$SERVER_DOMAIN"'"}}' https://njal.la/api/1/ | grep '"name": "'"$SERVER_HOSTNAME"'", "type": "SSHFP", "content": "[a-z0-9]\+", "ttl": [0-9]\+, "ssh_algorithm": 4, "ssh_type": 2' | wc -l)
     if [ $HAS_WRONG_ED25519_SHA256 = '0' ]
@@ -359,15 +358,15 @@ echo "127.0.0.1
 localhost
 192.168.0.1/24
 
-*.$DOMAIN" >> /data/opendkim/TrustedHosts
-echo "mail._domainkey.$DOMAIN $DOMAIN:mail:/data/opendkim/keys/$DOMAIN/mail.private" >> /data/opendkim/KeyTable
-echo "*@$DOMAIN mail._domainkey.$DOMAIN" >> /data/opendkim/SigningTable
-mkdir /data/opendkim/keys/$DOMAIN > /dev/null 2>&1
-opendkim-genkey -s mail -d $DOMAIN > /dev/null 2>&1
-mv mail.private /data/opendkim/keys/$DOMAIN/ > /dev/null 2>&1
-mv mail.txt /data/opendkim/keys/$DOMAIN/ > /dev/null 2>&1
+*.$SERVER_DOMAIN" >> /data/opendkim/TrustedHosts
+echo "mail._domainkey.$SERVER_DOMAIN $SERVER_DOMAIN:mail:/data/opendkim/keys/$SERVER_DOMAIN/mail.private" >> /data/opendkim/KeyTable
+echo "*@$SERVER_DOMAIN mail._domainkey.$SERVER_DOMAIN" >> /data/opendkim/SigningTable
+mkdir /data/opendkim/keys/$SERVER_DOMAIN > /dev/null 2>&1
+opendkim-genkey -s mail -d $SERVER_DOMAIN > /dev/null 2>&1
+mv mail.private /data/opendkim/keys/$SERVER_DOMAIN/ > /dev/null 2>&1
+mv mail.txt /data/opendkim/keys/$SERVER_DOMAIN/ > /dev/null 2>&1
 chown -R opendkim:opendkim /data/opendkim > /dev/null 2>&1
-DKIM_RECORD=$(cat /data/opendkim/keys/gahfy.io/mail.txt | tr '\n' ' ' | sed 's/mail._domainkey   IN      TXT     ( //' | sed "s/ )  ; ----- DKIM key mail for $DOMAIN//"  | sed 's/" \t  "//g')
+DKIM_RECORD=$(cat /data/opendkim/keys/$SERVER_DOMAIN/mail.txt | tr '\n' ' ' | sed 's/mail._domainkey   IN      TXT     ( //' | sed "s/ )  ; ----- DKIM key mail for $SERVER_DOMAIN//"  | sed 's/" \t  "//g')
 
 ################ INSTALL DOVECOT ################
 echo "Installing and configuring Dovecot"
@@ -378,8 +377,8 @@ sed -i 's/\(auth_mechanisms = plain\)/\1 login/' /etc/dovecot/conf.d/10-auth.con
 sed -i 's/\(!include auth-system.conf.ext\)/#\1/' /etc/dovecot/conf.d/10-auth.conf
 sed -i 's/#\(!include auth-sql.conf.ext\)/\1/' /etc/dovecot/conf.d/10-auth.conf
 sed -i 's|mail_location = mbox:~/mail:INBOX=/var/mail/%u|mail_location = maildir:/data/mail/virtual/%u|' /etc/dovecot/conf.d/10-mail.conf
-sed -i '0,/#separator =/separator = ./' /etc/dovecot/conf.d/10-mail.conf
-sed -i '0,/#prefix =/prefix = INBOX./' /etc/dovecot/conf.d/10-mail.conf
+sed -i ':a;N;$!ba;s/#separator =/separator = ./1' /etc/dovecot/conf.d/10-mail.conf
+sed -i ':a;N;$!ba;s/#prefix =/prefix = INBOX./1' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/#\(mail_uid =\)/\1 5000/' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/#\(mail_gid =\)/\1 5000/' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/\(mail_privileged_group = \)mail/\1virtual/' /etc/dovecot/conf.d/10-mail.conf
@@ -447,4 +446,4 @@ echo "TLSA => _25._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _465._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _587._tcp.$SMTP_DOMAIN_NAME => 2 0 1 $TLSA_SMTP_RECORD"
 echo "TLSA => _993._tcp.$IMAP_DOMAIN_NAME => 2 0 1 $TLSA_IMAP_RECORD"
-echo "TXT => mail._domainkey.$DOMAIN => $DKIM_RECORD"
+echo "TXT => mail._domainkey.$SERVER_DOMAIN => $DKIM_RECORD"
