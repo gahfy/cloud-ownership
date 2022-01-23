@@ -293,6 +293,44 @@ then
   else
     echo "Njal.la domain has already an SMTP CNAME record pointing to this server"
   fi
+
+  GOOD_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "'"${IMAP_HOSTNAME}"'", "type": "CNAME", "content": "'"${SERVER_HOSTNAME}"'"' | wc -l)
+  if [ ${GOOD_RECORD} = '0' ]
+  then
+    WRONG_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "'"${IMAP_HOSTNAME}"'", "type": "CNAME", "content": "'"[^\"]*"'"' | wc -l)
+    if [ ${WRONG_RECORD} = '0' ]
+    then
+      # Add A record
+      echo "Adding CNAME record for IMAP"
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"add-record", "params": {"domain": "'"${SERVER_DOMAIN}"'", "name": "'"${IMAP_HOSTNAME}"'", "content": "'"${SERVER_HOSTNAME}"'", "type": "CNAME", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
+    else
+      # Edit record
+      echo "Edit record to match the server hostname for IMAP"
+      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"${IMAP_HOSTNAME}"'".*$/\1/g')
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"edit-record", "params": {"domain": "'"${SERVER_DOMAIN}"'", "id": '"${RECORD_ID}"', "content": "'"${SERVER_HOSTNAME}"'", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
+    fi
+  else
+    echo "Njal.la domain has already an IMAP CNAME record pointing to this server"
+  fi
+
+  GOOD_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "'"${ROUNDCUBE_HOSTNAME}"'", "type": "CNAME", "content": "'"${SERVER_HOSTNAME}"'"' | wc -l)
+  if [ ${GOOD_RECORD} = '0' ]
+  then
+    WRONG_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "'"${ROUNDCUBE_HOSTNAME}"'", "type": "CNAME", "content": "'"[^\"]*"'"' | wc -l)
+    if [ ${WRONG_RECORD} = '0' ]
+    then
+      # Add A record
+      echo "Adding CNAME record for Roundcube"
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"add-record", "params": {"domain": "'"${SERVER_DOMAIN}"'", "name": "'"${ROUNDCUBE_HOSTNAME}"'", "content": "'"${SERVER_HOSTNAME}"'", "type": "CNAME", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
+    else
+      # Edit record
+      echo "Edit record to match the server hostname for Roundcube"
+      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"${ROUNDCUBE_HOSTNAME}"'".*$/\1/g')
+      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"edit-record", "params": {"domain": "'"${SERVER_DOMAIN}"'", "id": '"${RECORD_ID}"', "content": "'"${SERVER_HOSTNAME}"'", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
+    fi
+  else
+    echo "Njal.la domain has already an Roundcube CNAME record pointing to this server"
+  fi
 fi
 
 ################ INSTALL CERTBOT ################
@@ -462,7 +500,7 @@ DKIM_RECORD=$(cat /data/opendkim/keys/${SERVER_DOMAIN}/mail.txt | tr '\n' ' ' | 
 JSON_DKIM_RECORD=$(echo $DKIM_RECORD | sed 's/"/\\"/g')
 if [ ${HAS_DOMAIN} != '0' ]
 then
-  HAS_GOOD_DKIM=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "mail._domainkey", "type": "TXT", "content": "'${JSON_DKIM_RECORD}'"' | wc -l)
+  HAS_GOOD_DKIM=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "mail._domainkey", "type": "TXT", "content": "'"${JSON_DKIM_RECORD}"'"' | wc -l)
   if [ ${HAS_GOOD_SUBMISSION_TLSA} = '0' ]
   then
     HAS_WRONG_SUBMISSION_TLSA=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "mail._domainkey", "type": "TLSA"' | wc -l)
@@ -521,29 +559,6 @@ password_query = SELECT id AS user, crypt AS password, CONCAT(home,'/',maildir) 
 systemctl restart dovecot > /dev/null 2>&1
 ufw allow from any to any port 993 proto tcp > /dev/null 2>&1
 
-if [ ${HAS_DOMAIN} != '0' ]
-then
-  GOOD_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "'"${IMAP_HOSTNAME}"'", "type": "CNAME", "content": "'"${SERVER_HOSTNAME}"'"' | wc -l)
-  if [ ${GOOD_RECORD} = '0' ]
-  then
-    WRONG_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "'"${IMAP_HOSTNAME}"'", "type": "CNAME", "content": "'"[^\"]*"'"' | wc -l)
-    if [ ${WRONG_RECORD} = '0' ]
-    then
-      # Add A record
-      echo "Adding CNAME record for IMAP"
-      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"add-record", "params": {"domain": "'"${SERVER_DOMAIN}"'", "name": "'"${IMAP_HOSTNAME}"'", "content": "'"${SERVER_HOSTNAME}"'", "type": "CNAME", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
-    else
-      # Edit record
-      echo "Edit record to match the server hostname for IMAP"
-      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"${IMAP_HOSTNAME}"'".*$/\1/g')
-      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"edit-record", "params": {"domain": "'"${SERVER_DOMAIN}"'", "id": '"${RECORD_ID}"', "content": "'"${SERVER_HOSTNAME}"'", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
-    fi
-  else
-    echo "Njal.la domain has already an IMAP CNAME record pointing to this server"
-  fi
-fi
-
-
 BEGIN_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----BEGIN CERTIFICATE-----$' /etc/letsencrypt/live/${IMAP_HOSTNAME}.${SERVER_DOMAIN}/fullchain.pem | cut -f1 -d: | tail -n 1)
 END_LAST_CERTIFICATE_LINE_NUMBER=$(grep -n '^-----END CERTIFICATE-----$' /etc/letsencrypt/live/${IMAP_HOSTNAME}.${SERVER_DOMAIN}/fullchain.pem | cut -f1 -d: | tail -n 1)
 sed -n "${BEGIN_LAST_CERTIFICATE_LINE_NUMBER},${END_LAST_CERTIFICATE_LINE_NUMBER}p" /etc/letsencrypt/live/${IMAP_HOSTNAME}.${SERVER_DOMAIN}/fullchain.pem > authority_certificate.pem
@@ -554,7 +569,7 @@ then
   HAS_GOOD_IMAP_TLSA=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "_993._tcp.'"${IMAP_HOSTNAME}"'", "type": "TLSA", "content": "2 0 1 '"${TLSA_IMAP_RECORD}"'"' | wc -l)
   if [ ${HAS_GOOD_IMAP_TLSA} = '0' ]
   then
-    HAS_WRONG_SUBMISSION_TLSA=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "_993._tcp.'"${IMAP_HOSTNAME}"'", "type": "TLSA", "content": "[a-z0-9 ]*"' | wc -l)
+    HAS_WRONG_IMAP_TLSA=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "_993._tcp.'"${IMAP_HOSTNAME}"'", "type": "TLSA", "content": "[a-z0-9 ]*"' | wc -l)
     if [ ${HAS_WRONG_IMAP_TLSA} = '0' ]
     then
       # Add SSHFP record
@@ -590,7 +605,7 @@ echo "Installing and configuring Roundcube"
 DEBIAN_FRONTEND=noninteractive apt install -y roundcube > /dev/null 2>&1
 sed -i "s/[a-zA-Z0-9]\{16,32\}/$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24 ; echo '')/" /etc/roundcube/config.inc.php
 sed -i 's|\(\$config\['"'"'default_host'"'"'\] = '"'"'\)\('"'"';\)|\1ssl://'"${IMAP_HOSTNAME}.${SERVER_DOMAIN}"'\2|' /etc/roundcube/config.inc.php
-sed -i 's|\(\$config\['"'"'smtp_server'"'"'\] = '"'"'\)localhost\('"'"';\)|\1tls://'"${IMAP_HOSTNAME}.${SERVER_DOMAIN}"'\2|' /etc/roundcube/config.inc.php
+sed -i 's|\(\$config\['"'"'smtp_server'"'"'\] = '"'"'\)localhost\('"'"';\)|\1tls://'"${SMTP_HOSTNAME}.${SERVER_DOMAIN}"'\2|' /etc/roundcube/config.inc.php
 echo '$config['"'"'smtp_auth_type'"'"'] = '"'"'LOGIN'"'"';' >> /etc/roundcube/config.inc.php
 cat /etc/apache2/sites-available/default-ssl.conf | grep -vE '^[[:space:]]*$' | grep -vE '^[[:space:]]*#' >> /etc/apache2/sites-available/roundcube.conf
 sed -i "s|SSLCertificateFile\t/etc/ssl/certs/ssl-cert-snakeoil.pem|SSLCertificateFile	/etc/letsencrypt/live/${ROUNDCUBE_HOSTNAME}.${SERVER_DOMAIN}/fullchain.pem|" /etc/apache2/sites-available/roundcube.conf
@@ -600,33 +615,3 @@ sed -i "s|DocumentRoot /var/www/html|DocumentRoot /var/lib/roundcube/public_html
 sudo ufw allow from any to any port 443 proto tcp > /dev/null 2>&1
 a2ensite roundcube > /dev/null 2>&1
 systemctl restart apache2 > /dev/null 2>&1
-
-if [ ${HAS_DOMAIN} != '0' ]
-then
-  GOOD_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "'"${ROUNDCUBE_HOSTNAME}"'", "type": "CNAME", "content": "'"${SERVER_HOSTNAME}"'"' | wc -l)
-  if [ ${GOOD_RECORD} = '0' ]
-  then
-    WRONG_RECORD=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | grep '"name": "'"${ROUNDCUBE_HOSTNAME}"'", "type": "CNAME", "content": "'"[^\"]*"'"' | wc -l)
-    if [ ${WRONG_RECORD} = '0' ]
-    then
-      # Add A record
-      echo "Adding CNAME record for Roundcube"
-      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"add-record", "params": {"domain": "'"${SERVER_DOMAIN}"'", "name": "'"${ROUNDCUBE_HOSTNAME}"'", "content": "'"${SERVER_HOSTNAME}"'", "type": "CNAME", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
-    else
-      # Edit record
-      echo "Edit record to match the server hostname for Roundcube"
-      RECORD_ID=$(curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"list-records", "params": {"domain": "'"${SERVER_DOMAIN}"'"}}' https://njal.la/api/1/ | sed 's/^.*"id": \([0-9]*\), "name": "'"${ROUNDCUBE_HOSTNAME}"'".*$/\1/g')
-      curl -s -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Njalla ${NJALLA_TOKEN}" --data '{"method":"edit-record", "params": {"domain": "'"${SERVER_DOMAIN}"'", "id": '"${RECORD_ID}"', "content": "'"${SERVER_HOSTNAME}"'", "ttl": "86400"}}' https://njal.la/api/1/ > /dev/null 2>&1
-    fi
-  else
-    echo "Njal.la domain has already an Roundcube CNAME record pointing to this server"
-  fi
-fi
-
-echo ${SSHFP_RECORD}
-echo "\n\n"
-echo "TLSA => _25._tcp.${SMTP_HOSTNAME}.${SERVER_DOMAIN} => 2 0 1 ${TLSA_SMTP_RECORD}"
-echo "TLSA => _465._tcp.${SMTP_HOSTNAME}.${SERVER_DOMAIN} => 2 0 1 ${TLSA_SMTP_RECORD}"
-echo "TLSA => _587._tcp.${SMTP_HOSTNAME}.${SERVER_DOMAIN} => 2 0 1 ${TLSA_SMTP_RECORD}"
-echo "TLSA => _993._tcp.${IMAP_HOSTNAME}.${SERVER_DOMAIN} => 2 0 1 ${TLSA_IMAP_RECORD}"
-echo "TXT => mail._domainkey.${SERVER_DOMAIN} => ${DKIM_RECORD}"
